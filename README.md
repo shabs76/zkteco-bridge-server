@@ -44,20 +44,29 @@ Docker Compose.
 ## Architecture
 
 ```
-   ZKTeco devices                         Raspberry Pi (this appliance)                 Cloud
- ┌───────────────┐   pull  TCP 4370   ┌───────────────────────────────────┐
- │  Device A     │◀───────────────────│  zkbio (Go/Gin)                    │
- │  Device B     │                    │   ├─ collector  (pull poller)      │   HTTPS   ┌──────────────┐
- │  ...          │───────────────────▶│   ├─ iclock     (push endpoints)   │──────────▶│  ERP HR svc  │
- └───────────────┘   push  HTTP /iclock│   ├─ forwarder  (delivery)         │  X-Device │  /device/    │
-                                       │   └─ management API + dashboard    │  headers  │  attendance/ │
-                                       │           │                        │           │  logs        │
-                                       │        MariaDB (durable queue)     │           └──────────────┘
-                                       │        phpMyAdmin  :8081 (LAN)     │
-                                       └───────────────────────────────────┘
+   ZKTeco devices                     Raspberry Pi (this appliance)                    Cloud
+ ┌──────────────┐  pull TCP 4370  ┌──────────────────────────────────────┐
+ │  Device A    │◀────────────────│  zkbio (Go/Gin)                :8080 │
+ │  Device B    │                 │   ├─ collector  (pull poller)        │  HTTPS   ┌─────────────┐
+ │  ...         │────────────────▶│   ├─ iclock     (push endpoints)     │─────────▶│  ERP HR svc │
+ └──────────────┘  push /iclock   │   ├─ forwarder  (delivery)           │ X-Device │  /device/   │
+                                  │   └─ management API + dashboard      │ headers  │  attendance │
+                                  │                 │                    │          │  /logs      │
+                                  │             MariaDB (durable queue)  │          └─────────────┘
+   Operator browser               │                                      │
+ ┌──────────────┐ loads SPA :8082 │   phpMyAdmin                   :8081 │
+ │  web console │◀────────────────│   webui (Angular SPA / nginx)  :8082 │
+ │  (Angular)   │────────────────▶│   management API  :8080 (X-API-Key) │
+ └──────────────┘ REST /devices…  └──────────────────────────────────────┘
 ```
 
-The code follows the same four-layer layout as the other ERP Go services
+All four services run under one Docker Compose stack on the Pi. Note the split
+in the console's data path: the browser **loads** the static Angular bundle from
+the `webui` (nginx) service, but every management call goes **directly** from the
+browser to the gateway's API on `:8080` (with `X-API-Key`) — `webui` never
+proxies the API and never touches the database or HR.
+
+The gateway code follows the same four-layer layout as the other ERP Go services
 (`routes → controllers → database/*_db → database/gendb`); see `CLAUDE.md`.
 
 ### The HR ingest contract (must stay in lock-step)
