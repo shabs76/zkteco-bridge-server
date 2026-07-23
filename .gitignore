@@ -1,0 +1,12 @@
+# Secrets and runtime config — only the .example files are tracked.
+.env
+env/*.env
+!env/*.env.example
+
+# Local build / runtime artifacts
+src/zkbio
+src/logs/
+*.log
+
+# OS / editor
+.DS_Store

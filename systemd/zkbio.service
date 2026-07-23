@@ -1,0 +1,32 @@
+# systemd unit that brings the whole gateway stack up on boot and down on
+# shutdown. Combined with `restart: unless-stopped` on each container, this makes
+# the gateway a true appliance: pull the Pi's power, plug it back in, and it comes
+# back on its own and resumes delivering any punches that had not yet reached HR.
+#
+# Install (edit WorkingDirectory to where you cloned this repo):
+#   sudo cp systemd/zkbio.service /etc/systemd/system/zkbio.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now zkbio.service
+#
+# Status / logs:
+#   systemctl status zkbio.service
+#   docker compose -f /opt/zkteco_bio_server/docker-compose.yml logs -f zkbio
+
+[Unit]
+Description=ZKTeco Biometric Attendance Gateway (docker compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/zkteco_bio_server
+# Pull refreshed images if you use a registry; harmless for a local build.
+ExecStartPre=-/usr/bin/docker compose pull --quiet
+ExecStart=/usr/bin/docker compose up -d --build
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

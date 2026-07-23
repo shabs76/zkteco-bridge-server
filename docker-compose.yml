@@ -1,0 +1,136 @@
+---
+# ZKTeco biometric gateway — standalone appliance for a Raspberry Pi 4 (arm64).
+#
+# Four services on one private bridge network:
+#   zkbio       — the Go gateway. Publishes ONE port to the LAN (8080) that serves
+#                 both the operator/management API and the device-facing
+#                 ADMS/iclock push endpoints. Devices on the LAN reach it here;
+#                 it reaches the ERP HR service outbound over the internet.
+#   webui       — the Angular management console (static SPA on nginx), published
+#                 to the LAN (8082). Talks to the gateway's management API from the
+#                 operator's browser; configured at runtime in its Settings page.
+#   mariadb     — local database. The durable punch queue lives here. Not
+#                 published to the host — only zkbio and phpMyAdmin reach it.
+#   phpmyadmin  — published to the LAN (8081) so staff can view the data in a
+#                 browser at http://<pi-ip>:8081.
+#
+# Everything restarts on boot (restart: unless-stopped) — combined with the
+# systemd unit in ./systemd, the stack comes back automatically after a power cut
+# and the gateway resumes delivering any punches that had not yet reached HR.
+#
+# Config split: compose-level values (ports, image tags, TZ) live in .env;
+# service runtime config lives in env/<service>.env.
+
+name: zkteco-bio-gateway
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Gateway
+  # ─────────────────────────────────────────────────────────────────────────
+  zkbio:
+    build: .
+    image: zkbio:local
+    container_name: zkbio
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - ./env/zkbio.env
+    environment:
+      TZ: ${TZ:-Africa/Dar_es_Salaam}
+    ports:
+      # Published to the LAN: devices push here (/iclock/*) and operators call the
+      # management API here. Bind to a specific host IP by setting BIND_ADDR.
+      - "${BIND_ADDR:-0.0.0.0}:${ZKBIO_PORT:-8080}:8080"
+    volumes:
+      - zkbio_logs:/app/logs
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    # Modest memory ceiling so the gateway can never starve the Pi. Honored by
+    # Compose v2 outside Swarm.
+    mem_limit: 256m
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Management console (Angular SPA on nginx) — LAN-visible at http://<pi-ip>:8082
+  # Static files only; it calls the gateway's management API from the browser, so
+  # it needs no DB access and no secrets baked in. The gateway URL + API key are
+  # entered once in the console's Settings page (stored in the browser).
+  # ─────────────────────────────────────────────────────────────────────────
+  webui:
+    build: ./web
+    image: zkbio-webui:local
+    container_name: zkbio-webui
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${WEBUI_PORT:-8082}:80"
+    depends_on:
+      - zkbio
+    mem_limit: 128m
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Database (local, on the Pi)
+  # ─────────────────────────────────────────────────────────────────────────
+  mariadb:
+    image: mariadb:11.4
+    container_name: zkbio-mariadb
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=100
+      # Tuned for a 4 GB Pi: a small buffer pool leaves room for the gateway,
+      # phpMyAdmin and the OS.
+      - --innodb-buffer-pool-size=${INNODB_BUFFER_POOL_SIZE:-256M}
+    env_file:
+      - ./env/db.env
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      # First-start only: creates the erp_zkbio database + least-privilege users.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    mem_limit: 1200m
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # phpMyAdmin — LAN-visible data browser at http://<pi-ip>:8081
+  # ─────────────────────────────────────────────────────────────────────────
+  phpmyadmin:
+    image: phpmyadmin:5.2-apache
+    container_name: zkbio-phpmyadmin
+    restart: unless-stopped
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - ./env/phpmyadmin.env
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${PHPMYADMIN_PORT:-8081}:80"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    mem_limit: 256m
+
+volumes:
+  mariadb_data:
+  zkbio_logs:
+
+# Default bridge network (implicit) connects all three services. No external
+# network needed; the gateway's outbound HR calls use the host's internet.
