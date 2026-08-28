@@ -16,6 +16,8 @@ help:
 	@echo "  make ps        Container status"
 	@echo "  make preflight Sanity-check config before starting"
 	@echo "  make register-device   Interactive: register a device via the API"
+	@echo ""
+	@echo "On Windows use .\\make.ps1 instead (same targets) — see windows/README.md"
 
 init:
 	@[ -f .env ] || cp .env.example .env

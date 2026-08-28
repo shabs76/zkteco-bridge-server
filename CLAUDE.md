@@ -38,7 +38,14 @@ gofmt -l .                      # format check
 ```
 
 There are no tests in this repo yet; `go build ./...` and `go vet ./...` are the
-static checks. Behaviour is verified by running against a MariaDB and a device
+static checks — run them for **both** targets, since `service_windows.go` is
+build-tagged out on Linux/macOS:
+
+```bash
+GOOS=linux   go vet ./...
+GOOS=windows go vet ./...
+```
+ Behaviour is verified by running against a MariaDB and a device
 (or a simulated push with `curl` to `/iclock/cdata`).
 
 Deployment (from the repo root, on the Pi):
@@ -151,8 +158,43 @@ These mirror the HR service exactly so tooling sees one contract across the clus
 
 ## Deployment
 
-`Dockerfile` is a multi-stage pure-Go build (`golang:1.24-alpine` → `alpine`),
+`Dockerfile` is a multi-stage pure-Go build (`golang:1.25-alpine` → `alpine`),
 `CGO_ENABLED=0`, driven by `TARGETOS`/`TARGETARCH` from buildx so it produces an
 arm64 image for the Pi. `docker-compose.yml` runs the gateway plus a local
 MariaDB and a LAN-published phpMyAdmin. `systemd/zkbio.service` brings the stack
 up on boot. Keep `go.mod`'s `go` directive and the builder image version in step.
+
+### Windows
+
+The gateway is supported on Windows as a first-class target — same binary, same
+schema, same HR contract. Two paths: the Docker Desktop stack, and a native
+install running under the Service Control Manager. `make.ps1` (repo root) is the
+PowerShell counterpart of the `Makefile` and drives both; `windows/README.md` is
+the operator guide and `windows/zkbio.env.example` the native config template.
+
+Things to keep working when you touch this area:
+
+- **`main.go` imports `_ "time/tzdata"`.** Windows ships no `/usr/share/zoneinfo`,
+  so without the embedded IANA database `time.LoadLocation` fails and the gateway
+  silently falls back to UTC — every punch reaches HR with a wrong wall-clock
+  time. Do not drop this import to save the ~450 KB.
+- **`TZ` must be an IANA zone name on Windows too** (`Africa/Dar_es_Salaam`, not
+  `E. Africa Standard Time`). `scripts/preflight.ps1` rejects the Windows form.
+- **`main()` is split.** `runGateway(ctx)` boots everything and blocks on `ctx`,
+  returning errors instead of calling `os.Exit`, because the service handler has
+  to report a failed start to the SCM. `platformMain()` is the seam:
+  `service_windows.go` implements it (SCM detection + the `service` subcommands),
+  `service_other.go` is the no-op that makes every other OS fall through to the
+  foreground path. New startup steps belong in `runGateway`, not `main`.
+- **A Windows service starts in `C:\Windows\System32`.** `service_windows.go`
+  chdirs to the executable's directory before running, which is what makes the
+  adjacent `.env` and the relative default `LOG_DIR` resolve. Do not add code
+  that resolves a config path before that chdir.
+- **`.gitattributes` pins `*.sh`/`*.sql`/`Dockerfile` to LF.** A CRLF checkout of
+  `db/init/01-databases.sh` makes the MariaDB container fail with
+  `bad interpreter: /bin/bash^M`, and the resulting symptom looks like a wrong
+  password. Any new file that is bind-mounted into a Linux container needs an LF
+  rule.
+- **Keep both platforms building.** `GOOS=linux go vet ./...` and
+  `GOOS=windows go vet ./...` — the Windows-only file is invisible to a plain
+  `go vet` on Linux/macOS.

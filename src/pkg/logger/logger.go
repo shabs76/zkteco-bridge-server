@@ -4,6 +4,7 @@
 package logger
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -14,11 +15,13 @@ import (
 )
 
 // Setup wires slog and Gin to write JSON to both stdout (visible in `docker
-// logs`) and a rotating file under logDir.
-func Setup(logDir, filename string) {
+// logs`) and a rotating file under logDir. It returns an error rather than
+// exiting so the Windows service handler can report a failed start to the SCM;
+// under the SCM stdout goes nowhere, which makes the rotating file the only
+// record of what the gateway did.
+func Setup(logDir, filename string) error {
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		slog.Error("Failed to create log directory", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("create log directory %s: %w", logDir, err)
 	}
 
 	rotator := &lumberjack.Logger{
@@ -36,4 +39,5 @@ func Setup(logDir, filename string) {
 	slog.SetDefault(slog.New(handler))
 
 	slog.Info("Logger initialized", "path", filepath.Join(logDir, filename))
+	return nil
 }

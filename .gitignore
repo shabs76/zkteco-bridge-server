@@ -5,8 +5,12 @@ env/*.env
 
 # Local build / runtime artifacts
 src/zkbio
+src/zkbio.exe
 src/logs/
 *.log
+
+# Native Windows build output (binary + its live .env + rotated logs)
+dist/
 
 # OS / editor
 .DS_Store

@@ -116,6 +116,45 @@ no separate migration step.
 
 ---
 
+## Quick start (on Windows)
+
+The same gateway runs on Windows — same binary, same schema, same HR contract.
+`make.ps1` in the repo root is the PowerShell counterpart of the Makefile
+(`.\make.ps1 help` lists every target). Two paths, both covered in detail in
+[`windows/README.md`](windows/README.md):
+
+**Docker Desktop** — the whole stack, exactly as on the Pi:
+
+```powershell
+.\make.ps1 init          # scaffold .env and env\*.env, then edit them
+.\make.ps1 preflight
+.\make.ps1 up
+```
+
+**Native Windows Service** — no Docker; bring your own MariaDB. The gateway
+registers itself with the Service Control Manager, so it starts at boot before
+anyone logs in and restarts itself on failure:
+
+```powershell
+.\make.ps1 native-build              # -> dist\windows\zkbio.exe + .env
+notepad dist\windows\.env
+.\make.ps1 native-preflight
+# then, from an elevated PowerShell:
+.\make.ps1 service-install -DependsOn MariaDB
+.\make.ps1 service-start
+```
+
+Two things to know before you start:
+
+- **`TZ` must be an IANA zone name** (`Africa/Dar_es_Salaam`), never a Windows one
+  (`E. Africa Standard Time`). The binary embeds the IANA timezone database so no
+  tzdata needs installing, but it does not understand Windows zone IDs — and a
+  zone it cannot parse falls back to UTC, shifting every punch. Preflight rejects
+  the Windows form.
+- **Open inbound TCP 8080 on the Private profile** so LAN devices can push to it.
+
+---
+
 ## Registering a device
 
 Each physical ZKTeco unit maps to its **own HR device credential**, so HR can
@@ -260,7 +299,9 @@ web/                    Angular management console (SPA); own Dockerfile + nginx
 env/*.env.example       per-service runtime config
 db/init/                first-start DB + user creation
 migrations/001_init.sql canonical schema (the app also applies it on boot)
-systemd/                boot-persistence unit
-scripts/                preflight + register-device helpers
+systemd/                boot-persistence unit (Linux)
+make.ps1                Windows operator shortcuts (Makefile counterpart)
+windows/                native Windows Service deployment: env template + guide
+scripts/                preflight + register-device helpers (.sh and .ps1)
 src/                    the Go module (ismila/erp/zkbio) — see CLAUDE.md
 ```

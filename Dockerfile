@@ -4,7 +4,7 @@
 # to the target arch. Pure Go (no cgo) → no C toolchain needed. This is what lets
 # the same Dockerfile produce an arm64 image for the Raspberry Pi from an amd64
 # CI runner (build with: docker buildx build --platform linux/arm64 ...).
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 WORKDIR /app
 

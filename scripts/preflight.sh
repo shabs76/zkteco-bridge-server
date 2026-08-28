@@ -17,10 +17,11 @@ for f in .env env/zkbio.env env/db.env env/phpmyadmin.env; do
 done
 [ $fail -eq 0 ] || { echo "Preflight failed."; exit 1; }
 
-# No leftover CHANGEME placeholders
-if grep -RqI "CHANGEME" .env env/ 2>/dev/null; then
+# No leftover CHANGEME placeholders. Scan only the real config files, never the
+# *.env.example templates (they keep their CHANGEME placeholders by design).
+if grep -qI "CHANGEME" .env env/*.env 2>/dev/null; then
   note "CHANGEME placeholders still present — set real values:"
-  grep -RIl "CHANGEME" .env env/ 2>/dev/null | sed 's/^/      /'
+  grep -lI "CHANGEME" .env env/*.env 2>/dev/null | sed 's/^/      /'
   fail=1
 fi
 

@@ -1,0 +1,37 @@
+# Line endings.
+#
+# Windows checkouts default to CRLF, which silently breaks two things here:
+#   * db/init/01-databases.sh is bind-mounted into the Linux MariaDB container.
+#     With CRLF the container fails with "bad interpreter: /bin/bash^M" and the
+#     database + users are never created — the gateway then cannot connect and
+#     the failure looks like a password problem.
+#   * migrations/*.sql and the Dockerfile are read inside Linux images too.
+#
+# Anything that ends up inside a container, or is run by bash, is pinned to LF
+# regardless of the developer's platform. PowerShell/batch files are pinned to
+# CRLF, which cmd.exe requires for .bat/.cmd.
+
+* text=auto
+
+*.sh      text eol=lf
+*.sql     text eol=lf
+*.conf    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.env     text eol=lf
+*.example text eol=lf
+Dockerfile text eol=lf
+Makefile  text eol=lf
+*.service text eol=lf
+go.mod    text eol=lf
+go.sum    text eol=lf
+*.go      text eol=lf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.tgz  binary
+*.ico  binary
+*.exe  binary
