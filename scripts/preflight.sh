@@ -50,6 +50,16 @@ if [ -z "${enc}" ]; then
   note "CRED_ENC_KEY is empty — HR device keys will NOT be encrypted at rest"
 fi
 
+# Timezone: the gateway reads device timestamps in it and tells push devices
+# which offset to keep their clocks in. An unknown zone falls back to UTC and
+# shifts every punch, so reject it here rather than discover it in HR.
+tz=$(grep -E '^TZ=' .env | cut -d= -f2- || true)
+if [ -z "${tz}" ]; then
+  note "TZ is not set in .env — the stack will use Africa/Dar_es_Salaam"
+elif [ ! -f "/usr/share/zoneinfo/${tz}" ] && [ -d /usr/share/zoneinfo ]; then
+  note "TZ '${tz}' is not a known IANA zone name (e.g. Africa/Dar_es_Salaam)"; fail=1
+fi
+
 if [ $fail -ne 0 ]; then
   echo "Preflight failed."; exit 1
 fi

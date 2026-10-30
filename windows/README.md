@@ -43,6 +43,9 @@ notepad env\db.env      # DB passwords (MYSQL_PASS must match ERP_ZKBIO_DB_PASSW
 
 Then open the web console at `http://localhost:8082`.
 
+**Updating later:** `.\make.ps1 update`. It pulls the latest code, re-runs
+preflight and rebuilds the gateway; your `.env` files and the database are kept.
+
 Two Windows-specific points:
 
 - **Boot persistence.** There is no systemd here. Enable *Start Docker Desktop
@@ -145,11 +148,11 @@ The service sets its working directory to the folder containing `zkbio.exe`, so
 ### Upgrading
 
 ```powershell
-git pull
-.\make.ps1 service-stop
-.\make.ps1 native-build      # .env is left alone; only the exe is replaced
-.\make.ps1 service-start
+.\make.ps1 native-update     # elevated: pull, stop, rebuild exe, start
 ```
+
+`dist\windows\.env` is left alone; only the exe is replaced. If the build fails,
+the old exe is started again unchanged.
 
 Nothing is lost across the restart: every punch is written to the database as
 `Pending` before delivery is attempted and only marked `Sent` once HR confirms,
@@ -174,9 +177,13 @@ Almost always config or database. Check, in order:
 A missing required variable (`MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASS`,
 `MYSQL_DBNAME`, `HR_INGEST_URL`) is reported by name.
 
-**Punches arrive in HR with times a few hours off.**
-`TZ` is wrong or was a Windows zone name. Set an IANA name and run
-`.\make.ps1 native-preflight`.
+**Punches arrive in HR with times a few hours off (often exactly UTC).**
+First line of the gateway log reads `timezone tz=... now=...`; check it shows your
+zone and the right local time. The container and the service ignore the Windows
+clock and zone: only `TZ` counts. If the log is right but the time on the
+**device's screen** is wrong, update the gateway (it now sends the device its
+time zone) and restart the device once. If `TZ` is wrong or a Windows zone
+name, set an IANA name and run `.\make.ps1 preflight` (or `native-preflight`).
 
 **Devices cannot reach the gateway.**
 The firewall rule above, and confirm the device's ADMS/cloud server address

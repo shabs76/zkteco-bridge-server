@@ -11,6 +11,7 @@
       .\make.ps1 init          Scaffold .env and env\*.env from the .example files
       .\make.ps1 preflight     Sanity-check config before starting
       .\make.ps1 up            Build and start the whole stack (detached)
+      .\make.ps1 update        Pull the latest code, then rebuild and restart (config kept)
       .\make.ps1 down          Stop the stack (data volumes are preserved)
       .\make.ps1 restart       Restart the gateway container only
       .\make.ps1 build         Rebuild the gateway image
@@ -20,6 +21,7 @@
   Native Windows Service (no Docker; bring your own MariaDB):
       .\make.ps1 native-build      Compile dist\windows\zkbio.exe + scaffold its .env
       .\make.ps1 native-preflight  Sanity-check dist\windows\.env
+      .\make.ps1 native-update     Pull the latest code, rebuild the exe, restart the service
       .\make.ps1 service-install   Register the Windows Service (needs elevation)
       .\make.ps1 service-start     Start it
       .\make.ps1 service-status    Query it
@@ -38,8 +40,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help', 'init', 'preflight', 'up', 'down', 'restart', 'build', 'logs', 'ps', 'status',
-        'register-device', 'native-build', 'native-preflight',
+    [ValidateSet('help', 'init', 'preflight', 'up', 'update', 'down', 'restart', 'build', 'logs', 'ps', 'status',
+        'register-device', 'native-build', 'native-preflight', 'native-update',
         'service-install', 'service-uninstall', 'service-start', 'service-stop', 'service-status')]
     [string]$Target = 'help',
 
@@ -87,6 +89,19 @@ function Require-Elevation {
     }
 }
 
+# Fast-forward only: an update must never merge or overwrite local edits. The
+# config files (.env, env\*.env, dist\windows\.env) are untracked, so they are
+# never touched by the pull.
+function Pull-Latest {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw 'git not found on PATH - install Git for Windows, or replace this folder with the new release and run the target without "update".'
+    }
+    & git pull --ff-only
+    if ($LASTEXITCODE -ne 0) {
+        throw "git pull failed (exit $LASTEXITCODE) - run 'git status' to see local changes blocking the update."
+    }
+}
+
 function Copy-IfMissing($from, $to) {
     if (-not (Test-Path $to)) {
         Copy-Item $from $to
@@ -126,6 +141,12 @@ switch ($Target) {
         Write-Host "Gateway:     http://localhost:$($ports.ZKBIO_PORT)"
         Write-Host "phpMyAdmin:  http://localhost:$($ports.PHPMYADMIN_PORT)"
         break
+    }
+
+    'update' {
+        Pull-Latest
+        & $PSCommandPath up
+        exit $LASTEXITCODE
     }
 
     'down'    { Invoke-Compose @('down'); break }
@@ -169,6 +190,21 @@ switch ($Target) {
 
     'native-preflight' {
         & (Join-Path $PSScriptRoot 'scripts\preflight.ps1') -EnvFile (Join-Path $DistDir '.env')
+        exit $LASTEXITCODE
+    }
+
+    'native-update' {
+        Require-Exe
+        Pull-Latest
+        # Windows locks a running exe, so the service is stopped for the build.
+        # go build only replaces the file on success, so on a failed build the
+        # old exe is restarted unchanged.
+        & $ExePath service stop
+        try {
+            & $PSCommandPath native-build
+        } finally {
+            & $ExePath service start
+        }
         exit $LASTEXITCODE
     }
 

@@ -45,6 +45,7 @@ import (
 	"ismila/erp/zkbio/pkg/cryptutil"
 	"ismila/erp/zkbio/pkg/forwarder"
 	"ismila/erp/zkbio/pkg/hrclient"
+	"ismila/erp/zkbio/pkg/iclock"
 	"ismila/erp/zkbio/pkg/logger"
 	"ismila/erp/zkbio/pkg/scheduler"
 	"ismila/erp/zkbio/routes"
@@ -102,6 +103,12 @@ func runGateway(ctx context.Context) error {
 	if err != nil {
 		slog.Warn("invalid TZ, falling back to UTC", "tz", cfg.TimeZone, "error", err.Error())
 		loc = time.UTC
+	}
+	// Logged so an operator can confirm the zone without shelling into the box —
+	// a UTC here is the usual reason punches reach HR hours off.
+	slog.Info("timezone", "tz", loc.String(), "now", time.Now().In(loc).Format(time.RFC3339))
+	if _, ok := iclock.TimeZoneHours(loc, time.Now()); !ok {
+		slog.Warn("TZ has a part-hour offset; push devices cannot be told it — set their clocks by hand", "tz", loc.String())
 	}
 
 	// 3. Database: open the shared pool and apply the schema (idempotent).

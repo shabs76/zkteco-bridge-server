@@ -189,7 +189,8 @@ tell which unit a punch came from.
   `commPassword`.
 - **Push mode** — in the device's network / cloud (ADMS) settings, set the server
   address to the Pi's IP and port **8080** (path `/iclock`). The device will
-  register and start pushing. If `PUSH_AUTO_REGISTER_SN=true`, an unknown device
+  register and start pushing. The gateway tells it which time zone to keep
+  its clock in (from `TZ`, or the device's own `timezone` if set). If `PUSH_AUTO_REGISTER_SN=true`, an unknown device
   that starts pushing is auto-added (inactive of credential) so you only need to
   attach its HR credential afterward via
   `POST /devices/{id}/hr-credential`.
@@ -330,8 +331,43 @@ For local development against a running gateway, run it directly with
 
 ---
 
+## Updating an installed gateway
+
+Your config (`.env`, `env/*.env`) and the database are kept; only the code and
+the gateway image change. Punches queued while the gateway restarts are not lost.
+
+```bash
+make update              # Pi / Linux
+```
+
+```powershell
+.\make.ps1 update        # Windows, Docker Desktop
+.\make.ps1 native-update # Windows, native service (elevated PowerShell)
+```
+
+Each one pulls the latest code, re-runs preflight and restarts. If the pull
+refuses because of local changes, `git status` shows what is in the way.
+
+After updating, check the first log lines (`make logs`) for
+`timezone tz=Africa/Dar_es_Salaam` with the correct local time next to it.
+
+---
+
 ## Troubleshooting
 
+- **Punch times in HR are hours off (usually shown in UTC)** — open a recent
+  punch in phpMyAdmin (`attendance_punches`) and compare `raw_payload` with
+  `event_time`:
+  - *`raw_payload` already shows the wrong time* — the **device clock** is off.
+    Push devices set their clock from the gateway and need the `TimeZone` the
+    gateway now sends; restart the device once after updating so it fetches it,
+    then check the time on its screen. A pull device keeps its own clock: set it
+    on the device menu.
+  - *`raw_payload` is right but `event_time` is wrong* — the gateway's zone is
+    wrong. Check the `timezone` line in the gateway log, `TZ` in `.env`, and the
+    device's own `timezone` field in the console (it overrides `TZ`).
+  - Punches already delivered with a wrong time are not corrected
+    automatically; fix them in HR.
 - **A device shows `hrCredentialSet: false` on the dashboard** — its punches are
   being stored but held `Pending`. Attach a credential with
   `POST /devices/:id/hr-credential`.

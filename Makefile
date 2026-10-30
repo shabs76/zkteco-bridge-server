@@ -3,12 +3,13 @@
 
 COMPOSE ?= docker compose
 
-.PHONY: help init up down restart build logs ps status preflight register-device backup-note
+.PHONY: help init up update down restart build logs ps status preflight register-device backup-note
 
 help:
 	@echo "Targets:"
 	@echo "  make init      Scaffold .env and env/*.env from the .example files"
 	@echo "  make up        Build and start the whole stack (detached)"
+	@echo "  make update    Pull the latest code, then rebuild and restart (config kept)"
 	@echo "  make down      Stop the stack (data volumes are preserved)"
 	@echo "  make restart   Restart the gateway container only"
 	@echo "  make build     Rebuild the gateway image"
@@ -34,6 +35,12 @@ up: preflight
 	@echo "Web console: http://<pi-ip>:$${WEBUI_PORT:-8082}"
 	@echo "Gateway:     http://<pi-ip>:$${ZKBIO_PORT:-8080}"
 	@echo "phpMyAdmin:  http://<pi-ip>:$${PHPMYADMIN_PORT:-8081}"
+
+# Fast-forward only, so an update never merges over local edits. .env and
+# env/*.env are untracked and survive the pull; the database volume is kept.
+update:
+	git pull --ff-only
+	@$(MAKE) --no-print-directory up
 
 down:
 	$(COMPOSE) down

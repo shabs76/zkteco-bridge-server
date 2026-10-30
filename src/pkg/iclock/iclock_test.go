@@ -1,6 +1,10 @@
 package iclock
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestParseUserInfoWithUserToken(t *testing.T) {
 	body := "USER PIN=1001\tName=Asha Mwanga\tPri=14\tPasswd=\tCard=12345\tGrp=1\tTZ=0\n" +
@@ -60,5 +64,39 @@ func TestParseUserInfoKeepsNamelessUser(t *testing.T) {
 func TestParseUserInfoIgnoresJunk(t *testing.T) {
 	if recs := ParseUserInfo("\n\t\nnonsense\n"); len(recs) != 0 {
 		t.Fatalf("want no records, got %+v", recs)
+	}
+}
+
+// The option block must tell the device its zone, or the firmware keeps its
+// clock in GMT (from the HTTP Date header) and stamps every punch hours early.
+func TestRegistryReplyTimeZone(t *testing.T) {
+	dar, err := time.LoadLocation("Africa/Dar_es_Salaam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := RegistryReply("SN1", dar); !strings.Contains(got, "\nTimeZone=3\n") {
+		t.Errorf("Dar es Salaam reply missing TimeZone=3:\n%s", got)
+	}
+	if got := RegistryReply("SN1", time.UTC); !strings.Contains(got, "\nTimeZone=0\n") {
+		t.Errorf("UTC reply missing TimeZone=0:\n%s", got)
+	}
+
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := RegistryReply("SN1", kolkata); strings.Contains(got, "TimeZone=") {
+		t.Errorf("part-hour zone must omit TimeZone, got:\n%s", got)
+	}
+}
+
+func TestTimeZoneHoursNegative(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	winter := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	if h, ok := TimeZoneHours(ny, winter); !ok || h != -5 {
+		t.Errorf("New York in January = %d, %v; want -5, true", h, ok)
 	}
 }

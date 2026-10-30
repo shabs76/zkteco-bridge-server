@@ -202,6 +202,11 @@ Things to keep working when you touch this area:
   so without the embedded IANA database `time.LoadLocation` fails and the gateway
   silently falls back to UTC — every punch reaches HR with a wrong wall-clock
   time. Do not drop this import to save the ~450 KB.
+- **Push devices keep their clock in the zone the gateway tells them.**
+  `iclock.RegistryReply` sends `TimeZone=<hours>` from the device's `timezone`
+  (else `TZ`); the firmware adds it to the GMT HTTP `Date` header. Drop it and
+  the device clock drifts to UTC, so every punch reaches HR hours early. A
+  part-hour zone cannot be expressed and is omitted (warned at startup).
 - **`TZ` must be an IANA zone name on Windows too** (`Africa/Dar_es_Salaam`, not
   `E. Africa Standard Time`). `scripts/preflight.ps1` rejects the Windows form.
 - **`main()` is split.** `runGateway(ctx)` boots everything and blocks on `ctx`,

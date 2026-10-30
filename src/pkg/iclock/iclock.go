@@ -75,7 +75,11 @@ func atoi(s string) int {
 // RegistryReply builds the response to a device's initial GET /iclock/cdata
 // handshake. The device keeps pushing as long as it gets a 200 with a
 // well-formed option block; these values ask for real-time attendance delivery.
-func RegistryReply(sn string) string {
+//
+// TimeZone matters as much as the rest: firmwares set their clock from the
+// reply's HTTP Date header, which is always GMT, and add this offset. Without
+// it the device clock drifts to UTC and every punch is stamped hours early.
+func RegistryReply(sn string, loc *time.Location) string {
 	var b strings.Builder
 	b.WriteString("GET OPTION FROM: " + sn + "\n")
 	b.WriteString("Stamp=9999\n")
@@ -85,9 +89,26 @@ func RegistryReply(sn string) string {
 	b.WriteString("TransTimes=00:00;14:00\n")
 	b.WriteString("TransInterval=1\n")
 	b.WriteString("TransFlag=1111000000\n")
+	if h, ok := TimeZoneHours(loc, time.Now()); ok {
+		b.WriteString("TimeZone=" + strconv.Itoa(h) + "\n")
+	}
 	b.WriteString("Realtime=1\n")
 	b.WriteString("Encrypt=0\n")
 	return b.String()
+}
+
+// TimeZoneHours returns loc's UTC offset at t in whole hours, the unit the ADMS
+// TimeZone option takes. ok is false for a part-hour zone (Asia/Kolkata), which
+// the option cannot express; the option is then left out rather than sent wrong.
+func TimeZoneHours(loc *time.Location, t time.Time) (int, bool) {
+	if loc == nil {
+		loc = time.Local
+	}
+	_, off := t.In(loc).Zone()
+	if off%3600 != 0 {
+		return 0, false
+	}
+	return off / 3600, true
 }
 
 // UserRecord is one enrolled user parsed from an ADMS user push.

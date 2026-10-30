@@ -50,12 +50,16 @@ func CData(c *gin.Context) {
 
 	if c.Request.Method == http.MethodGet {
 		// Registration / options poll. Resolve-or-register so the device is known.
+		var dev *deviceRow
 		if cfg != nil && cfg.AutoRegisterSN {
-			if id, _ := ensureDevice(sn); id != "" {
+			var id string
+			if id, dev = ensureDevice(sn); id != "" {
 				devicedb.TouchLastSeen(id, time.Now())
 			}
+		} else if id, ok := deviceID(sn); ok {
+			dev = loadRow(id)
 		}
-		c.String(http.StatusOK, iclock.RegistryReply(sn))
+		c.String(http.StatusOK, iclock.RegistryReply(sn, dev.location()))
 		return
 	}
 
@@ -90,18 +94,12 @@ func CData(c *gin.Context) {
 	}
 	devicedb.TouchLastSeen(id, time.Now())
 
-	loc := gwLoc
 	stateMap := ""
 	if dev != nil {
-		if dev.Timezone != "" {
-			if l, err := time.LoadLocation(dev.Timezone); err == nil {
-				loc = l
-			}
-		}
 		stateMap = dev.PunchStateMap
 	}
 
-	records := iclock.ParseAttlog(string(bodyBytes), loc)
+	records := iclock.ParseAttlog(string(bodyBytes), dev.location())
 	stored := 0
 	for _, r := range records {
 		np := &punchstructs.NewPunch{
@@ -209,6 +207,18 @@ func ensureDevice(sn string) (string, *deviceRow) {
 type deviceRow struct {
 	Timezone      string
 	PunchStateMap string
+}
+
+// location is the zone this device's naive timestamps are read in, and the
+// zone it is told to keep its clock in: its own timezone when set and valid,
+// otherwise the gateway's. Safe on a nil row.
+func (d *deviceRow) location() *time.Location {
+	if d != nil && d.Timezone != "" {
+		if l, err := time.LoadLocation(d.Timezone); err == nil {
+			return l
+		}
+	}
+	return gwLoc
 }
 
 func deviceID(sn string) (string, bool) {
