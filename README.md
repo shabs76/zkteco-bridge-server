@@ -204,6 +204,61 @@ pairs punches by time. To force a mapping, set a device `punchStateMap`, e.g.
 
 ---
 
+## Employee names
+
+The gateway keeps a local registry of device users, so an operator can tell *who*
+a punch belongs to instead of reading bare PINs. Names reach it three ways:
+
+| Source | How | Marked |
+|---|---|---|
+| **Pull** | The collector reads the device's enrolled-user table over TCP 4370, on its own slow cadence (`EMPLOYEE_SYNC_INTERVAL_SECONDS`, hourly by default) — enrolments change rarely. `POST /devices/:id/sync-employees` runs it immediately. | `pull` |
+| **Push** | An ADMS device uploads its user table to `/iclock/cdata` as `USER` rows on the `OPERLOG`/`USERINFO` table. | `push` |
+| **Import** | `POST /employees/import` with a CSV. | `import` |
+
+> **Names are not forwarded to HR.** The HR ingest contract carries
+> `employeeNumber` only (see `pkg/hrclient`), and this gateway keeps that
+> contract in lock-step with HR. The registry is for the console, exports and
+> reconciliation.
+
+> **A punch line never carries a name.** In both protocols the punch itself is
+> just a PIN and a timestamp; the device sends its user table separately. So a
+> name appears against a punch once that user table has been read at least once —
+> not necessarily on the very first punch from a newly enrolled person.
+
+### Operator corrections win
+
+A name set by CSV import or by editing a row (`PATCH /employees/:id`) is marked
+`import` / `manual` and a later device sync **will not overwrite it**. Fix a
+misspelling once and it stays fixed, even though the device's flash still holds
+the old spelling. Everything else — card number, privilege, last-seen — keeps
+refreshing from the device.
+
+### Import / export
+
+```bash
+# Export (honours the same filters as the list endpoint)
+curl -H "X-API-Key: $MGMT_API_KEY" http://<host>:8080/employees/export -o employees.csv
+
+# Import — raw CSV body...
+curl -X POST -H "X-API-Key: $MGMT_API_KEY" -H 'Content-Type: text/csv' \
+     --data-binary @employees.csv http://<host>:8080/employees/import
+
+# ...or a multipart upload (what the web console sends)
+curl -X POST -H "X-API-Key: $MGMT_API_KEY" \
+     -F file=@employees.csv http://<host>:8080/employees/import
+```
+
+The export columns are exactly what the import accepts, so a file can be
+exported, edited in a spreadsheet and imported straight back. Only
+`employeeNumber` is required; headers are matched case- and separator-insensitively
+(`employee_number`, `Employee Number`), a UTF-8 BOM from Excel is tolerated, and
+`pin` / `employeeId` / `userId` and `full name` are accepted as aliases. Rows
+upsert on `employeeNumber`, so re-importing a corrected file fixes names rather
+than duplicating people. The response reports created/updated/skipped/failed
+counts with per-line errors.
+
+---
+
 ## Management API
 
 All JSON endpoints require the header `X-API-Key: <MGMT_API_KEY>` (or

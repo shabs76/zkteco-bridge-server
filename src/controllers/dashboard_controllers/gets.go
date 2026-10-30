@@ -7,6 +7,7 @@ import (
 	"time"
 
 	devicedb "ismila/erp/zkbio/database/device_db"
+	employeedb "ismila/erp/zkbio/database/employee_db"
 	punchdb "ismila/erp/zkbio/database/punch_db"
 	milastructs "ismila/erp/zkbio/mila_structs"
 	dashboardstructs "ismila/erp/zkbio/mila_structs/dashboard_structs"
@@ -37,6 +38,10 @@ func Dashboard(c *gin.Context) {
 		FailedPunches:  counts.Failed,
 		SentPunches:    counts.Sent,
 		TotalPunches:   counts.Total,
+	}
+	// Registry size is informational; a failure must not sink the dashboard.
+	if n, eresp := employeedb.CountEmployees(); eresp == nil || eresp.IsSuccess {
+		out.Employees = n
 	}
 	if t := punchdb.OldestPending(); t != nil {
 		s := t.Format(time.RFC3339)

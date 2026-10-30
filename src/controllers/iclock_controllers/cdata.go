@@ -8,11 +8,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"ismila/erp/zkbio/config"
 	devicedb "ismila/erp/zkbio/database/device_db"
+	employeedb "ismila/erp/zkbio/database/employee_db"
 	punchdb "ismila/erp/zkbio/database/punch_db"
+	employeestructs "ismila/erp/zkbio/mila_structs/employee_structs"
 	punchstructs "ismila/erp/zkbio/mila_structs/punch_structs"
 	"ismila/erp/zkbio/pkg/iclock"
 	"ismila/erp/zkbio/pkg/punchmap"
@@ -56,11 +59,20 @@ func CData(c *gin.Context) {
 		return
 	}
 
-	// POST — a data upload. Only ATTLOG carries attendance; everything else
-	// (OPERLOG, ATTPHOTO, ...) is acknowledged and ignored.
-	table := c.Query("table")
+	// POST — a data upload. ATTLOG carries attendance; OPERLOG/USERINFO carry the
+	// enrolled-user rows that give us names. Everything else (ATTPHOTO, ...) is
+	// acknowledged and ignored.
+	table := strings.ToUpper(c.Query("table"))
 	bodyBytes, _ := io.ReadAll(io.LimitReader(c.Request.Body, 8<<20))
-	if table != "ATTLOG" {
+
+	switch table {
+	case "ATTLOG":
+		// handled below
+	case "OPERLOG", "USERINFO":
+		storeUserInfo(sn, string(bodyBytes))
+		c.String(http.StatusOK, "OK")
+		return
+	default:
 		if id, _ := deviceID(sn); id != "" {
 			devicedb.TouchLastSeen(id, time.Now())
 		}
@@ -115,6 +127,44 @@ func CData(c *gin.Context) {
 		}
 	}
 	c.String(http.StatusOK, "OK")
+}
+
+// storeUserInfo records the enrolled-user rows a device pushes, which is how the
+// push path learns names. A punch line carries only the PIN; the device uploads
+// its user table separately (OPERLOG/USERINFO), so this is the only point at
+// which a pushed punch can acquire a name.
+//
+// Names arriving here are device-sourced, so an operator's imported or
+// hand-edited name is left intact (see employeedb.UpsertFromDevice).
+func storeUserInfo(sn, body string) {
+	id, _ := ensureDevice(sn)
+	if id == "" {
+		return
+	}
+	devicedb.TouchLastSeen(id, time.Now())
+
+	records := iclock.ParseUserInfo(body)
+	if len(records) == 0 {
+		return
+	}
+	created, updated := 0, 0
+	for _, r := range records {
+		du := &employeestructs.DeviceUser{
+			EmployeeNumber: r.PIN,
+			Name:           r.Name,
+			CardNumber:     r.CardNumber,
+			Privilege:      r.Privilege,
+		}
+		switch outcome, resp := employeedb.UpsertFromDevice(du, id, employeestructs.SourcePush); outcome {
+		case employeedb.Created:
+			created++
+		case employeedb.Updated:
+			updated++
+		default:
+			slog.Error("iclock: store user failed", "sn", sn, "pin", r.PIN, "error", resp.Message)
+		}
+	}
+	slog.Info("iclock: stored pushed users", "sn", sn, "received", len(records), "created", created, "updated", updated)
 }
 
 // GetRequest answers the device's command poll. We have no commands to push, so

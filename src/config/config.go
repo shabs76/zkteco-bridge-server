@@ -41,6 +41,12 @@ type Config struct {
 	PullInterval    time.Duration // default poll cadence per device
 	PullConnTimeout time.Duration
 
+	// Employee (device user) name sync over the pull protocol. Enrolments change
+	// rarely, so this runs on its own much slower cadence than the punch poll —
+	// reading the whole user table every 30s would be pointless load on the device.
+	EmployeeSyncEnabled  bool
+	EmployeeSyncInterval time.Duration
+
 	// Push (ADMS/iclock) tuning
 	PushEnabled    bool
 	AutoRegisterSN bool // auto-create an inactive device row for an unknown pushing SN
@@ -87,6 +93,9 @@ func Load() (*Config, error) {
 	c.PullEnabled = getbool("PULL_ENABLED", true)
 	c.PullInterval = getdur("PULL_INTERVAL_SECONDS", 30*time.Second)
 	c.PullConnTimeout = getdur("PULL_CONN_TIMEOUT_SECONDS", 10*time.Second)
+
+	c.EmployeeSyncEnabled = getbool("EMPLOYEE_SYNC_ENABLED", true)
+	c.EmployeeSyncInterval = getdur("EMPLOYEE_SYNC_INTERVAL_SECONDS", time.Hour)
 
 	c.PushEnabled = getbool("PUSH_ENABLED", true)
 	c.AutoRegisterSN = getbool("PUSH_AUTO_REGISTER_SN", true)

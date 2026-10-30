@@ -2,6 +2,16 @@
 
 Guidance for Claude Code (claude.ai/code) when working in this repository.
 
+## Hard rule: the user comes first
+
+Every feature is designed from the user's side before it is built: who uses it, from which screen, in how many steps, with what they already know. "The endpoint exists" is not done; "a normal user can do it easily and safely" is.
+
+- **Every thing a user creates, they can find, edit, move and remove** from the screen where they see it (with confirmation and a reason where it is irreversible). No create-only features.
+- **Never ask users for what they cannot know**: no IDs, keys, UUIDs, hashes, slugs or raw JSON in normal flows. Offer pickers, search, QR/short codes and plain words; keep raw input only under "Advanced" for support.
+- **Simplest path first**: the common task takes the fewest steps from where the user already is; rare or dangerous actions are one level deeper and clearly marked.
+- **Safe by default**: confirm destructive acts, show what will happen in plain language, block invalid states instead of erroring after the fact, and explain every refusal with what to do next.
+- Before handing over, walk the feature as the least technical user who will use it. If any step needs a developer to explain it, it is not finished.
+
 ## What this service is
 
 The **ZKTeco biometric attendance gateway** (`ismila/erp/zkbio`), a member of the
@@ -37,8 +47,8 @@ go run main.go                  # run (needs a reachable MariaDB + a .env)
 gofmt -l .                      # format check
 ```
 
-There are no tests in this repo yet; `go build ./...` and `go vet ./...` are the
-static checks — run them for **both** targets, since `service_windows.go` is
+Tests cover the two binary/text decoders and route registration
+(`go test ./...`); `go build ./...` and `go vet ./...` are the other static checks — run them for **both** targets, since `service_windows.go` is
 build-tagged out on Linux/macOS:
 
 ```bash
@@ -87,6 +97,7 @@ pkg/
 ├── forwarder/   delivery engine: batches Pending punches → HR, marks Sent/Failed
 ├── hrclient/    HTTP client for the HR ingest endpoint (contract mirror)
 ├── punchmap/    device punch-state → IN/OUT mapping (shared by pull + push)
+├── empsync/     read a device's enrolled-user table (names) into the registry
 ├── cryptutil/   AES-GCM encryption of HR keys at rest
 ├── scheduler/   retention purge of delivered punches
 ├── middleware/  management-API key guard
@@ -100,6 +111,7 @@ pkg/
 | Adding | Where |
 |---|---|
 | New management endpoint | `routes/management.go` + `controllers/<domain>_controllers/*` + `database/<domain>_db/*` + `mila_structs/<domain>_structs/*` |
+| A static path under an existing `/:id` route | Register it **before** the `:id` route and extend `routes/management_test.go` — a sibling conflict panics at startup |
 | New device-facing endpoint | `routes/iclock.go` + `controllers/iclock_controllers` |
 | New SQL | `database/<domain>_db/{insert,select,update}.go` |
 | Schema change | edit `migrations/001_init.sql` **and** the embedded copy `src/database/gendb/schema.sql` (keep them identical), or add a new migration file and apply it in `gendb.Migrate` |
@@ -130,6 +142,18 @@ pkg/
 - **Punch direction is lossy on some devices.** `punchmap` maps the raw state;
   devices not set to In/Out mode emit state 0 for everything (all `IN`). This is
   expected — configure the device or set `punchStateMap`.
+- **Employee names are gateway-local and never sent to HR.** The HR ingest
+  contract carries `employeeNumber` only; `employees` exists so operators can see
+  who a punch belongs to. Do not add a name to `hrclient.LogEntry` without HR's
+  `device_structs` changing first.
+- **Operator-set names are sticky.** `employeedb.UpsertFromDevice` will not
+  overwrite a name on a row whose `source` is `import`/`manual` — a device's stale
+  flash must not undo a correction. That rule lives in the `ON DUPLICATE KEY
+  UPDATE` CASE; if you rewrite that statement, keep it.
+- **A punch line carries no name in either protocol.** Names come from the
+  device's user table: `zk.ReadUsers` on pull, `USER` rows on the
+  `OPERLOG`/`USERINFO` table on push. Anything expecting a name on an ATTLOG row
+  is misreading the protocol.
 - **Pull is best-effort across firmwares.** `pkg/zk` implements the traditional
   PREPARE_DATA transfer path (covers the large majority). A minority of firmwares
   only speak the buffered transfer; those devices should use push mode. Spot-check

@@ -22,6 +22,7 @@ type DashboardResponse struct {
 	FailedPunches  int64          `json:"failedPunches"`
 	SentPunches    int64          `json:"sentPunches"`
 	TotalPunches   int64          `json:"totalPunches"`
+	Employees      int64          `json:"employees"` // rows in the local name registry
 	OldestPending  *string        `json:"oldestPending"`
 	LastDelivery   *string        `json:"lastDelivery"`
 	DeviceHealth   []DeviceHealth `json:"deviceHealth"`

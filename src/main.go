@@ -37,6 +37,7 @@ import (
 
 	"ismila/erp/zkbio/config"
 	devicecontrollers "ismila/erp/zkbio/controllers/device_controllers"
+	employeecontrollers "ismila/erp/zkbio/controllers/employee_controllers"
 	iclockcontrollers "ismila/erp/zkbio/controllers/iclock_controllers"
 	gendb "ismila/erp/zkbio/database/gendb"
 	milastructs "ismila/erp/zkbio/mila_structs"
@@ -124,6 +125,7 @@ func runGateway(ctx context.Context) error {
 
 	// 6. Inject controller dependencies.
 	devicecontrollers.SetDeps(cipher)
+	employeecontrollers.SetDeps(cfg)
 	iclockcontrollers.SetDeps(cfg, loc, fwd.Trigger)
 
 	// 7. Background workers.

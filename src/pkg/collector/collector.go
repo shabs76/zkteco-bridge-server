@@ -14,6 +14,7 @@ import (
 	punchdb "ismila/erp/zkbio/database/punch_db"
 	devicestructs "ismila/erp/zkbio/mila_structs/device_structs"
 	punchstructs "ismila/erp/zkbio/mila_structs/punch_structs"
+	"ismila/erp/zkbio/pkg/empsync"
 	"ismila/erp/zkbio/pkg/punchmap"
 	"ismila/erp/zkbio/pkg/zk"
 )
@@ -24,11 +25,18 @@ type Collector struct {
 	gwLoc   *time.Location
 	onStore func() // called after new punches are stored (nudges the forwarder)
 	nextDue map[string]time.Time
+	// Separate, much slower schedule for the enrolled-user (name) sync. Names
+	// change when someone is hired, not every poll.
+	nextUserSync map[string]time.Time
 }
 
 // New builds a Collector. onStore may be nil.
 func New(cfg *config.Config, gwLoc *time.Location, onStore func()) *Collector {
-	return &Collector{cfg: cfg, gwLoc: gwLoc, onStore: onStore, nextDue: map[string]time.Time{}}
+	return &Collector{
+		cfg: cfg, gwLoc: gwLoc, onStore: onStore,
+		nextDue:      map[string]time.Time{},
+		nextUserSync: map[string]time.Time{},
+	}
 }
 
 // Run drives the poll loop until ctx is cancelled. The outer tick is fixed and
@@ -76,6 +84,11 @@ func (c *Collector) cycle(ctx context.Context) {
 
 		n := c.pollDevice(dev)
 		stored += n
+
+		// Sequential with the poll above on purpose: many ZK units accept only
+		// one session at a time, so the sync dials only after pollDevice's
+		// client has been closed.
+		c.syncEmployeesIfDue(dev, now)
 	}
 	if stored > 0 && c.onStore != nil {
 		c.onStore()
@@ -172,4 +185,28 @@ func (c *Collector) pollDevice(dev *devicestructs.ZKDevice) int {
 		slog.Info("collector: stored punches", "device", dev.ID, "name", dev.Name, "new", stored, "read", len(records))
 	}
 	return stored
+}
+
+// syncEmployeesIfDue reads the device's enrolled-user table when this device's
+// (slow) sync interval has elapsed. Failures are logged and retried on the next
+// interval rather than surfaced: a device that cannot serve its user table must
+// never disturb punch collection, which is the job that actually matters.
+func (c *Collector) syncEmployeesIfDue(dev *devicestructs.ZKDevice, now time.Time) {
+	if !c.cfg.EmployeeSyncEnabled || dev.IPAddress == "" {
+		return
+	}
+	if due, ok := c.nextUserSync[dev.ID]; ok && now.Before(due) {
+		return
+	}
+	c.nextUserSync[dev.ID] = now.Add(c.cfg.EmployeeSyncInterval)
+
+	res, err := empsync.SyncDevice(dev, c.cfg.PullConnTimeout)
+	if err != nil {
+		slog.Warn("collector: employee sync failed", "device", dev.ID, "name", dev.Name, "error", err.Error())
+		return
+	}
+	if res.Created > 0 || res.Updated > 0 {
+		slog.Info("collector: synced employees", "device", dev.ID, "name", dev.Name,
+			"read", res.Read, "created", res.Created, "updated", res.Updated)
+	}
 }

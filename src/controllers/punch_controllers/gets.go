@@ -3,9 +3,11 @@
 package punchcontrollers
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
+	employeedb "ismila/erp/zkbio/database/employee_db"
 	punchdb "ismila/erp/zkbio/database/punch_db"
 	milastructs "ismila/erp/zkbio/mila_structs"
 	punchstructs "ismila/erp/zkbio/mila_structs/punch_structs"
@@ -40,9 +42,28 @@ func ListPunches(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, resp)
 		return
 	}
+	// Decorate with names from the local registry. One extra query for the whole
+	// page, never per row — and a failure here degrades to blank names rather
+	// than failing the punch list, which is the operator's core view.
+	numbers := make([]string, 0, len(punches))
+	seen := map[string]bool{}
+	for _, p := range punches {
+		if p.EmployeeNumber != "" && !seen[p.EmployeeNumber] {
+			seen[p.EmployeeNumber] = true
+			numbers = append(numbers, p.EmployeeNumber)
+		}
+	}
+	names, nresp := employeedb.NamesByNumbers(numbers)
+	if nresp != nil && !nresp.IsSuccess {
+		slog.Warn("punches: name lookup failed, returning punches without names", "error", nresp.Message)
+		names = map[string]string{}
+	}
+
 	out := make([]punchstructs.PunchResponse, 0, len(punches))
 	for _, p := range punches {
-		out = append(out, punchstructs.ToPunchResponse(p))
+		pr := punchstructs.ToPunchResponse(p)
+		pr.EmployeeName = names[p.EmployeeNumber]
+		out = append(out, pr)
 	}
 	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
 	c.JSON(http.StatusOK, milastructs.PaginationResponse{

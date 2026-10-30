@@ -89,3 +89,83 @@ func RegistryReply(sn string) string {
 	b.WriteString("Encrypt=0\n")
 	return b.String()
 }
+
+// UserRecord is one enrolled user parsed from an ADMS user push.
+type UserRecord struct {
+	PIN        string // device user id == HR employee_number
+	Name       string
+	CardNumber string
+	Privilege  int
+	Raw        string
+}
+
+// ParseUserInfo parses the user rows an ADMS device uploads.
+//
+// Names do NOT ride along on an ATTLOG punch line — the punch carries only the
+// PIN. The device sends its user table separately, as USER rows on the OPERLOG
+// table (or on a USERINFO table, depending on firmware), typically right after
+// registration and again whenever an enrolment changes. Capturing those rows is
+// what lets the gateway show a name against a pushed punch.
+//
+// Both shapes are accepted, with or without the leading USER token:
+//
+//	USER PIN=1	Name=Asha Mwanga	Pri=0	Passwd=	Card=12345	Grp=1	TZ=0
+//	PIN=1	Name=Asha Mwanga	Card=12345
+//
+// Fields are tab-separated key=value pairs. Unknown keys are ignored and any
+// line without a PIN is skipped, because OPERLOG interleaves genuine operator
+// log rows (OPLOG ...) with the user rows.
+func ParseUserInfo(body string) []UserRecord {
+	var out []UserRecord
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimRight(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// Strip an optional leading "USER" token; anything else leading (OPLOG,
+		// FP, FACE, BIODATA...) is a row this gateway does not consume.
+		rest := trimmed
+		if head, tail, ok := strings.Cut(trimmed, " "); ok {
+			switch strings.ToUpper(head) {
+			case "USER":
+				rest = tail
+			default:
+				if !strings.HasPrefix(strings.ToUpper(head), "PIN=") {
+					continue
+				}
+			}
+		} else if !strings.HasPrefix(strings.ToUpper(trimmed), "PIN=") {
+			continue
+		}
+
+		rec := UserRecord{Raw: line}
+		for _, field := range strings.Split(rest, "\t") {
+			key, value, ok := strings.Cut(field, "=")
+			if !ok {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			switch strings.ToUpper(strings.TrimSpace(key)) {
+			case "PIN":
+				rec.PIN = value
+			case "NAME":
+				rec.Name = value
+			case "CARD":
+				// "0" means no card enrolled; keep it empty so it never
+				// overwrites a card number set from an import.
+				if value != "0" {
+					rec.CardNumber = value
+				}
+			case "PRI":
+				rec.Privilege = atoi(value)
+			}
+		}
+		if rec.PIN == "" {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}

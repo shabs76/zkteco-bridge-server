@@ -112,3 +112,48 @@ CREATE TABLE IF NOT EXISTS delivery_batches (
     INDEX idx_batch_device  (device_id, created_at),
     INDEX idx_batch_created (created_at)
 );
+
+-- ================================================================
+-- employees — the gateway's local registry of device users (names).
+--
+-- ZKTeco devices store a name alongside each enrolled user id. The HR ingest
+-- contract carries only employeeNumber (see pkg/hrclient), so names are NOT
+-- forwarded — they exist here so operators can tell WHO a punch belongs to when
+-- reconciling in the console, in exports, and in the punch list.
+--
+-- Filled from three directions, all upserting on employee_number:
+--   • pull   — the collector reads the device user table over TCP 4370
+--   • push   — an ADMS device POSTs USERINFO/OPERLOG rows to /iclock/cdata
+--   • import — an operator uploads a CSV (or edits a row by hand -> 'manual')
+--
+-- employee_number is globally unique, not per-device: the same person enrolled
+-- on the Main Gate and the Workshop reader is one row. That matches how HR keys
+-- attendance (employeeNumber alone) and is what makes a CSV round-trip sane.
+--
+-- Precedence: a name set by import/manual is authoritative and a later device
+-- sync will NOT overwrite it (see employee_db.UpsertFromDevice). Operators fix a
+-- name once; a stale name still sitting in device flash cannot undo the fix.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS employees (
+    id                CHAR(36)     NOT NULL DEFAULT UUID() PRIMARY KEY,
+    employee_number   VARCHAR(50)  NOT NULL,                 -- device user id (PIN) == HR employee_number
+    name              VARCHAR(150) NOT NULL DEFAULT '',
+    card_number       VARCHAR(50)  NOT NULL DEFAULT '',      -- RFID card, if the device carries one
+    privilege         INT          NOT NULL DEFAULT 0,       -- device privilege (0 user, 14 admin)
+    device_user_id    VARCHAR(50)  NOT NULL DEFAULT '',      -- device-internal uid (NOT the PIN); informational
+
+    -- Where this row's name came from. 'import'/'manual' are sticky: device
+    -- syncs refresh the other columns but leave such a name alone.
+    source            ENUM('pull','push','import','manual') NOT NULL DEFAULT 'pull',
+
+    last_device_id    CHAR(36)     DEFAULT NULL,             -- FK zk_devices: unit this user was last seen on
+    is_active         BOOLEAN      NOT NULL DEFAULT TRUE,
+    last_seen_at      DATETIME     DEFAULT NULL,             -- last time a device reported this user
+    created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_employee_number (employee_number),
+    INDEX idx_emp_name (name),
+    INDEX idx_emp_device (last_device_id),
+    CONSTRAINT fk_emp_device FOREIGN KEY (last_device_id) REFERENCES zk_devices(id) ON DELETE SET NULL
+);
